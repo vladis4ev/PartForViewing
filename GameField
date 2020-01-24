@@ -1,0 +1,249 @@
+class GameField extends Sprite {
+
+    constructor(logo) {
+        super();
+
+        this.TO_COLOR_BTN = "toColorBtn";
+        this.TO_PIC_PART = "toPicPart";
+        this.logo = logo;
+        this.fingerTarget = null;
+        this.timerToFinger = null;
+        this.createChildren();
+        this.setListeners();
+    }
+
+    createChildren() {
+        PicturePart.setDrawEffect();
+        this.pictureField = this.addChild(new PictureField());
+        this.pictureBuffer = this.addChild(new PictureBuffer());
+        this.darkShader = this.pictureBuffer.darkShader;
+        this.hintPhrase = this.addChild(new HintPhrase("PICK A COLOR"));
+        this.hintPhrase.visible = false;
+        this.colorPicer = this.addChild(new ColorPicer());
+        this.cta = this.addChild(new DownloadButton("PLAY NOW"));
+        this.finger = this.addChild(new Forefinger());
+        this.finger.visible = false;
+        this.addChild(this.logo);
+        this.whiteShader = this.addChild(new PIXI.Graphics());
+        this.whiteShader.beginFill(0xffffff, 1);
+        this.whiteShader.drawRect(-10, -10, 20, 20);
+        this.whiteShader.endFill();
+    }
+
+    setListeners() {
+        this.colorPicer.interactiveChildren = false;
+        this.pictureField.pictures.map((p) => {
+            this.pictureBuffer.addChild(p);
+            p.colorBtn = this.colorPicer.setColorBtn(p);
+            p.picPartView.on("pointerdown", p.paintUp, p);
+            p.on("onPaintUp", this.paintUp, this);
+        }, this);
+        if(this.colorPicer.buttons.length < ColorPicer.MAX_VIEW_BTNS){
+            ColorPicer.MAX_VIEW_BTNS = this.colorPicer.buttons.length;
+            ColorPicer.BTNS_CONT_W = ColorPicer.MAX_VIEW_BTNS;
+            this.colorPicer.updtBtnsCont();
+        }
+        this.colorPicer.on("onSelectColor", this.showPicPart, this);
+        this.colorPicer.on("onDeSelectColor", this.hidePicPart, this);
+        this.colorPicer.on("onHideTutor", this.resetTimerToFinger, this);
+        this.pictureField.on("onStartingAnimComplete", this.startGame, this);
+
+        this.pictureBuffer.interactiveChildren = false;
+    }
+
+    startFinger() {
+        let w = LayoutManager.gameWidth;
+        let h = LayoutManager.gameHeight;
+
+        this.finger.position.set(w / 2, h / 2);
+        this.finger.visible = true;
+
+        this.fingerTarget = this.TO_COLOR_BTN;
+        this.fingerToBtn();
+    }
+
+    startingAnimation() {
+        new Tween(this.whiteShader, {alpha: 0}, 500, {delay: 500}).once("complete", () => {
+                this.whiteShader.visible = false;
+                this.pictureField.pieceAnimation();
+            }, this
+        );
+    }
+
+    startGame() {
+        this.hintPhrase.scale.set(.01);
+        this.hintPhrase.visible = true;
+        new Tween(this.hintPhrase, {
+            scale: {
+                x: 1,
+                y: 1
+            }
+        }, 350).once("complete", this.startFinger, this);
+        this.colorPicer.interactiveChildren = true;
+    }
+
+    paintUp(picPart) {
+        this.pictureBuffer.setChildIndex(picPart, 0);
+        this.pictureField.pictures = this.pictureField.pictures.filter(pic => pic !== picPart);
+        let btn = picPart.colorBtn;
+        let picParts = btn.picParts;
+        picParts = picParts.filter(part => part !== picPart);
+        if (picParts.length === 0) {
+            this.darkShader.visible = false;
+            this.colorPicer.removeBtn(btn);
+            this.hidePicPart();
+        }
+        picPart = null;
+
+        if (this.pictureField.pictures.length === 0) {
+            if (this.timerToFinger) {
+                this.timerToFinger.stop();
+                this.timerToFinger = null;
+                this.fingerTarget = null;
+            }
+
+            this.hintPhrase.visible = false;
+            new Timer(2 * PicturePart.TIME_ANIM).once("complete", () => {
+                this.emit("onOutro");
+            }, this);
+        } else {
+            if (picParts.length === 0) this.resetTimerToFinger(this.TO_COLOR_BTN);
+            else this.resetTimerToFinger(this.TO_PIC_PART, picParts[0]);
+        }
+    }
+
+    resetTimerToFinger(direct, pic) {
+        let w = LayoutManager.gameWidth;
+        let h = LayoutManager.gameHeight;
+        new Tween(this.finger, {
+            x: w / 2,
+            y: h / 2,
+            alpha: 0
+        }, 150).once("complete", obj => obj.visible = false, this);
+
+        if (this.timerToFinger) {
+            this.timerToFinger.stop();
+            this.timerToFinger = null;
+        }
+        this.fingerTarget = direct || this.fingerTarget;
+        if (this.fingerTarget === this.TO_PIC_PART) this.timerToFinger = new Timer(PicturePart.TIME_ANIM + CONFIG.application.hintTimer).once("complete", () => {
+            if (pic)
+                this.fingerToPic(pic.picPartView);
+            else
+                this.fingerToPic(this.pictureBuffer.getChildAt(this.pictureBuffer.children.length - 1).picPartView);
+        }, this);
+        if (this.fingerTarget === this.TO_COLOR_BTN) this.timerToFinger = new Timer(PicturePart.TIME_ANIM + CONFIG.application.hintTimer).once("complete", this.fingerToBtn, this);
+    }
+
+    fingerToBtn() {
+        let gPs = this.colorPicer.buttons.map(btn => btn.getGlobalPosition());
+        let i = gPs.findIndex(this.colorPicer.getFirstViewBtn, this.colorPicer);
+        this.finger.moveToPos(this.colorPicer.buttons[i], this.toLocal(gPs[i]));
+    }
+
+    fingerToPic(pic) {
+        let gP = pic.getGlobalPosition(new PIXI.Point(0, 0));
+        this.finger.moveToPos(pic, this.toLocal(gP));
+    }
+
+    showPicPart(picParts) {
+        this.hintPhrase.changeText("COLOR THE PICTURE");
+        if (!this.darkShader.visible) {
+            this.darkShader.alpha = 0;
+            this.darkShader.visible = true;
+            new Tween(this.darkShader, {alpha: 1}, 200);
+        }
+        this.pictureBuffer.addChild(this.darkShader);
+        picParts.map(part => this.pictureBuffer.addChild(part));
+        this.resetTimerToFinger(this.TO_PIC_PART, picParts[0]);
+        this.pictureBuffer.interactiveChildren = true;
+    }
+
+    hidePicPart() {
+        this.hintPhrase.changeText("PICK A COLOR");
+        this.darkShader.visible = false;
+        this.pictureBuffer.interactiveChildren = false;
+        this.resetTimerToFinger(this.TO_COLOR_BTN);
+    }
+
+    static get PIC_LEF() {
+        return 50;
+    }
+
+    onResize() {
+        let w = LayoutManager.gameWidth;
+        let h = LayoutManager.gameHeight;
+        let pFlB = this.pictureField.getLocalBounds();
+        let ctaLB = this.cta.getLocalBounds();
+
+        if (this.whiteShader.visible) {
+            this.whiteShader.width = w;
+            this.whiteShader.height = h;
+        }
+        this.logo.scale.set(1);
+        if (LayoutManager.orientation === LayoutManager.LANDSCAPE) {
+            this.pictureField.scale.set(.9 * h / pFlB.height);
+            if (this.pictureField.width > .525 * w) {
+                this.pictureField.scale.set(.525 * w / pFlB.width);
+                this.logo.scale.set(.9);
+                this.cta.scale.set(.375 * w / ctaLB.width);
+            } else {
+                this.cta.scale.set(1.15);
+            }
+            this.colorPicer.onResize(w - GameField.PIC_LEF - this.pictureField.width);
+            let maxW = Math.max(...[this.logo, this.hintPhrase, this.colorPicer, this.cta].map(obj => {
+                return obj.WIDTH || obj.width
+            }));
+            let d = (w - this.pictureField.width - maxW) / 3;
+            this.pictureField.position.set(-w / 2 + d + this.pictureField.width / 2, 0);
+            GameField.alignVerticall(this.pictureField.x + this.pictureField.width / 2 + d + maxW / 2, this.logo, this.hintPhrase, this.colorPicer, this.cta);
+        } else {
+            this.pictureField.scale.set(.85 * w / pFlB.width);
+            if (this.pictureField.height > .43 * h) {
+                this.pictureField.scale.set(.43 * h / pFlB.height);
+                this.logo.scale.set(.45 * this.pictureField.height / this.logo.height);
+            }
+            this.cta.scale.set(.75 * this.pictureField.width / ctaLB.width);
+            this.colorPicer.onResize(w);
+            GameField.alignVerticall(0, this.logo, this.hintPhrase, this.pictureField, this.colorPicer, this.cta);
+        }
+        this.pictureBuffer.children.map((p) => {
+            if (p instanceof PIXI.Graphics) {
+                p.width = w;
+                p.height = h;
+            } else {
+                p.scale.set(this.pictureField.scale.x);
+                p.position = this.pictureField.position;
+            }
+        }, this);
+
+
+        if (this.finger.visible && this.finger.targetObj) {
+            if (this.finger.targetObj instanceof ColorBtn) {
+                new Timer(ColorPicer.ANIM_TIME).once("complete", this.fingerToBtn, this);
+            } else {
+                let gP = this.finger.targetObj.getGlobalPosition(new PIXI.Point(0, 0));
+                this.finger.moveToPos(this.finger.targetObj, this.toLocal(gP));
+            }
+        }
+    }
+
+    static alignVerticall(x, ...arr) {
+        let h = LayoutManager.gameHeight;
+        let hArr = arr.map(obj => GameField.getObjHeight(obj));
+        let dist = (h - hArr.reduce((sum, h) => sum + h)) / (hArr.length + 1);
+        arr.map((obj) => {
+            let i = arr.indexOf(obj);
+            let d = i <= 0 ? -h / 2 : (arr[i - 1].y + GameField.getObjHeight(arr[i - 1]) / 2);
+            obj.position.set(x, d + dist + GameField.getObjHeight(obj) / 2);
+        });
+    }
+
+    static getObjHeight(obj) {
+        return obj.height === 1 || obj.HEIGHT ? obj.HEIGHT : obj.height;
+    }
+
+    tick(delta) {
+        this.colorPicer.tick(delta);
+    }
+}
